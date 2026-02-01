@@ -1,0 +1,40 @@
+name: safety
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # Your added packages
+  camera: ^0.11.0
+  google_mlkit_face_detection: ^0.13.0
+  permission_handler: ^11.3.0
+  audioplayers: ^6.0.0
+  http: ^1.6.0
+  geolocator: ^14.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# This is the ONLY place 'flutter:' should appear
+flutter:
+  uses-material-design: true
+  
+  # Assets must be indented exactly 2 spaces from the left
+  assets:
+    - assets/alarm.mp3
+
+# Add this section at the very bottom of the file
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon.png"
+  min_sdk_android: 21

@@ -13,6 +13,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 
+
 // ----------------------------------------------------------------------
 // 1. APP CONFIGURATION & CONSTANTS
 // ----------------------------------------------------------------------

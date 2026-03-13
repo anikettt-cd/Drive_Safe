@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Auth
@@ -12,6 +11,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
+
+// ---> NEW BLUETOOTH IMPORTS <---
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'dart:typed_data';
+import 'package:shared_preferences/shared_preferences.dart';
 
 
 // ----------------------------------------------------------------------
@@ -276,7 +280,7 @@ class _SignUpPageState extends State<SignUpPage> {
 }
 
 // ----------------------------------------------------------------------
-// 5. DRIVER SETUP (Updated with Logout)
+// 5. DRIVER SETUP (Updated with Persistence)
 // ----------------------------------------------------------------------
 class DriverSetupPage extends StatefulWidget {
   const DriverSetupPage({super.key});
@@ -290,6 +294,24 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
   final _carController = TextEditingController();
   final _bloodController = TextEditingController();
   final _emergencyController = TextEditingController(); 
+
+  // --- ADDED PERSISTENCE LOGIC ---
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedDriverData(); // Load data as soon as the page opens
+  }
+
+  Future<void> _loadSavedDriverData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _nameController.text = prefs.getString('driver_name') ?? '';
+      _carController.text = prefs.getString('car_number') ?? '';
+      _bloodController.text = prefs.getString('blood_type') ?? '';
+      _emergencyController.text = prefs.getString('telegram_id') ?? '';
+    });
+  }
+  // -------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -373,16 +395,28 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
     );
   }
 
-  void _startMonitoring() {
+  // --- UPDATED SAVE LOGIC ---
+  void _startMonitoring() async {
     if (_formKey.currentState!.validate()) {
-      Navigator.push(context, MaterialPageRoute(builder: (context) => DrowsinessDetectionPage(
-            driverName: _nameController.text,
-            carNumber: _carController.text,
-            bloodType: _bloodController.text,
-            emergencyContact: _emergencyController.text,
-      )));
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save data to memory
+      await prefs.setString('driver_name', _nameController.text);
+      await prefs.setString('car_number', _carController.text);
+      await prefs.setString('blood_type', _bloodController.text);
+      await prefs.setString('telegram_id', _emergencyController.text);
+
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => DrowsinessDetectionPage(
+              driverName: _nameController.text,
+              carNumber: _carController.text,
+              bloodType: _bloodController.text,
+              emergencyContact: _emergencyController.text,
+        )));
+      }
     }
   }
+  // --------------------------
 
   Widget _buildProfessionalInput(TextEditingController controller, String label, IconData icon, {bool isNumber = false, String? hint}) {
     return TextFormField(
@@ -404,7 +438,7 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
 }
 
 // ----------------------------------------------------------------------
-// 6. MAIN DETECTION DASHBOARD (Kept Exact Same Logic)
+// 6. MAIN DETECTION DASHBOARD 
 // ----------------------------------------------------------------------
 class DrowsinessDetectionPage extends StatefulWidget {
   final String driverName;
@@ -421,8 +455,14 @@ class DrowsinessDetectionPage extends StatefulWidget {
 class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   CameraController? _cameraController;
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final String telegramBotToken = "7609570341:AAFI0FnPF8kxU9iU5Q7pF_3ok298vQiHESI"; 
+  final String telegramBotToken = "8758696223:AAEy9rOEnIG4yiG3wqHA2mE3pV0OKDaVzMI"; 
   final FaceDetector _faceDetector = FaceDetector(options: FaceDetectorOptions(enableClassification: true, enableContours: true, enableTracking: true));
+
+  // ---> NEW HARDWARE-OPTIONAL BLUETOOTH VARIABLES <---
+  BluetoothConnection? _bluetoothConnection;
+  bool _isBluetoothConnected = false;
+  // Replace with your actual HC-03 MAC address later
+  final String hc03MacAddress = "00:00:00:00:00:00"; 
 
   bool _isBusy = false;
   bool _isDrowsy = false; 
@@ -439,7 +479,12 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   }
 
   Future<void> _initializeSystem() async {
-    await [Permission.camera, Permission.location].request();
+    // Added Bluetooth permissions to the request list
+    await [Permission.camera, Permission.location, Permission.bluetooth, Permission.bluetoothConnect, Permission.bluetoothScan].request();
+    
+    // Attempt hardware connection gracefully
+    _connectToBluetooth();
+
     final cameras = await availableCameras();
     final frontCamera = cameras.firstWhere((camera) => camera.lensDirection == CameraLensDirection.front, orElse: () => cameras.first);
 
@@ -449,6 +494,40 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
 
     _cameraController!.startImageStream(_processCameraImage);
     setState(() { _statusMessage = "Active Monitoring"; _statusColor = const Color(0xFF4CAF50); });
+  }
+
+  // ---> HARDWARE OPTIONAL CONNECT FUNCTION <---
+  Future<void> _connectToBluetooth() async {
+    try {
+      _bluetoothConnection = await BluetoothConnection.toAddress(hc03MacAddress);
+      setState(() {
+        _isBluetoothConnected = true;
+      });
+      debugPrint('Connected to the HC-03 Hardware!');
+    } catch (error) {
+      // If hardware isn't found, it simply logs it and moves on. App won't crash!
+      debugPrint('Hardware not found or Bluetooth off. Operating in Software-Only mode: $error');
+      setState(() {
+        _isBluetoothConnected = false;
+      });
+    }
+  }
+
+  // ---> HARDWARE OPTIONAL SIGNAL FUNCTION <---
+  void _sendStopSignal() {
+    // Only attempts to send the signal if the car is actually connected
+    if (_isBluetoothConnected && _bluetoothConnection != null) {
+      try {
+        _bluetoothConnection!.output.add(Uint8List.fromList('S'.codeUnits));
+        _bluetoothConnection!.output.allSent.then((_) {
+          debugPrint('Emergency Stop signal sent to the car!');
+        });
+      } catch (e) {
+        debugPrint('Error sending hardware signal: $e');
+      }
+    } else {
+      debugPrint('Software alarm triggered! (Hardware not connected)');
+    }
   }
 
   Future<void> _processCameraImage(CameraImage image) async {
@@ -492,11 +571,14 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
           setState(() { _isDrowsy = true; _statusMessage = "🚨 DROWSINESS DETECTED!"; _statusColor = Colors.red.shade700; _statusIcon = Icons.campaign; });
           _audioPlayer.play(AssetSource(AppConstants.ALERT_SOUND));
           _audioPlayer.setReleaseMode(ReleaseMode.loop); 
+          
+          // ---> CALL THE HARDWARE SIGNAL <---
+          _sendStopSignal();
         }
       }
       if (duration > AppConstants.EMERGENCY_ALERT_MS) {
         if (!_telegramAlertSent) {
-          _sendTelegramAlertWithLocation(); 
+          (); 
           setState(() { _telegramAlertSent = true; _statusMessage = "📤 CONTACTING EMERGENCY..."; });
         }
       }
@@ -515,7 +597,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       locationText = "Lat: ${position.latitude.toStringAsFixed(4)}, Lng: ${position.longitude.toStringAsFixed(4)}";
-      mapsLink = "https://www.google.com/maps/search/?api=1&query=${position.latitude},${position.longitude}";
+      mapsLink = "https://www.google.com/maps?q=${position.latitude},${position.longitude}";
       hospitalList = await _getNearbyHospitals(position.latitude, position.longitude);
     } catch (e) {
       locationText = "GPS Signal Lost";
@@ -585,8 +667,17 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     return width == 0 ? 0.0 : height / width;
   }
   double _euclideanDistance(math.Point<int> p1, math.Point<int> p2) { return math.sqrt(math.pow(p2.x - p1.x, 2) + math.pow(p2.y - p1.y, 2)); }
+  
   @override
-  void dispose() { _cameraController?.dispose(); _faceDetector.close(); _audioPlayer.dispose(); super.dispose(); }
+  void dispose() { 
+    _cameraController?.dispose(); 
+    _faceDetector.close(); 
+    _audioPlayer.dispose(); 
+    // ---> GRACEFUL DISPOSE BLUETOOTH <---
+    _bluetoothConnection?.dispose();
+    super.dispose(); 
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(

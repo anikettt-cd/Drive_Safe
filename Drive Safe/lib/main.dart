@@ -3,20 +3,15 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Auth
-import 'package:firebase_core/firebase_core.dart'; // Core
+import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:firebase_core/firebase_core.dart'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:http/http.dart' as http;
-
-// ---> NEW BLUETOOTH IMPORTS <---
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
-import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:http/http.dart' as http;
 
 // ----------------------------------------------------------------------
 // 1. APP CONFIGURATION & CONSTANTS
@@ -32,7 +27,7 @@ class AppConstants {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(); // <--- Initialize Firebase
+  await Firebase.initializeApp(); 
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const DriverSafetyApp());
 }
@@ -66,14 +61,13 @@ class DriverSafetyApp extends StatelessWidget {
           ),
         ),
       ),
-      // Check if user is logged in
       home: const AuthGate(),
     );
   }
 }
 
 // ----------------------------------------------------------------------
-// 2. AUTH GATE (The Gatekeeper)
+// 2. AUTH GATE - Standard Auth Management
 // ----------------------------------------------------------------------
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -83,11 +77,12 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // If logged in, go to Driver Setup
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
         if (snapshot.hasData) {
           return const DriverSetupPage();
         }
-        // If not logged in, go to Login Page
         return const LoginPage();
       },
     );
@@ -119,9 +114,11 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // AuthGate handles navigation automatically
     } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? "Login Failed"), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message ?? "Login Failed"), 
+        backgroundColor: Colors.red
+      ));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -189,7 +186,7 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 // ----------------------------------------------------------------------
-// 4. SIGN UP PAGE
+// 4. SIGN UP PAGE - Solves Data Persistence Conflict
 // ----------------------------------------------------------------------
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -213,10 +210,17 @@ class _SignUpPageState extends State<SignUpPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Pop back to login/auth gate
+      
+      // SOLVE DATA PROBLEM: Ensure new user doesn't inherit old local data
+      // We don't call prefs.clear() here because we want to preserve other settings, 
+      // but we ensure a fresh setup for this UID.
+      
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? "Sign Up Failed"), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message ?? "Sign Up Failed"), 
+        backgroundColor: Colors.red
+      ));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -280,7 +284,7 @@ class _SignUpPageState extends State<SignUpPage> {
 }
 
 // ----------------------------------------------------------------------
-// 5. DRIVER SETUP (Updated with Persistence)
+// 5. DRIVER SETUP - Standard Data Isolation Logic
 // ----------------------------------------------------------------------
 class DriverSetupPage extends StatefulWidget {
   const DriverSetupPage({super.key});
@@ -295,23 +299,27 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
   final _bloodController = TextEditingController();
   final _emergencyController = TextEditingController(); 
 
-  // --- ADDED PERSISTENCE LOGIC ---
   @override
   void initState() {
     super.initState();
-    _loadSavedDriverData(); // Load data as soon as the page opens
+    _loadSavedDriverData(); 
   }
 
+  // Uses UID to prevent account data crossover
   Future<void> _loadSavedDriverData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    
     final prefs = await SharedPreferences.getInstance();
+    final uid = user.uid;
+
     setState(() {
-      _nameController.text = prefs.getString('driver_name') ?? '';
-      _carController.text = prefs.getString('car_number') ?? '';
-      _bloodController.text = prefs.getString('blood_type') ?? '';
-      _emergencyController.text = prefs.getString('telegram_id') ?? '';
+      _nameController.text = prefs.getString('${uid}_name') ?? '';
+      _carController.text = prefs.getString('${uid}_car') ?? '';
+      _bloodController.text = prefs.getString('${uid}_blood') ?? '';
+      _emergencyController.text = prefs.getString('${uid}_telegram') ?? '';
     });
   }
-  // -------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +330,9 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(), // <--- LOGOUT BUTTON
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+            }, 
           )
         ],
       ),
@@ -395,16 +405,18 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
     );
   }
 
-  // --- UPDATED SAVE LOGIC ---
   void _startMonitoring() async {
     if (_formKey.currentState!.validate()) {
-      final prefs = await SharedPreferences.getInstance();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
       
-      // Save data to memory
-      await prefs.setString('driver_name', _nameController.text);
-      await prefs.setString('car_number', _carController.text);
-      await prefs.setString('blood_type', _bloodController.text);
-      await prefs.setString('telegram_id', _emergencyController.text);
+      final prefs = await SharedPreferences.getInstance();
+      final uid = user.uid;
+      
+      await prefs.setString('${uid}_name', _nameController.text);
+      await prefs.setString('${uid}_car', _carController.text);
+      await prefs.setString('${uid}_blood', _bloodController.text);
+      await prefs.setString('${uid}_telegram', _emergencyController.text);
 
       if (mounted) {
         Navigator.push(context, MaterialPageRoute(builder: (context) => DrowsinessDetectionPage(
@@ -416,7 +428,6 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
       }
     }
   }
-  // --------------------------
 
   Widget _buildProfessionalInput(TextEditingController controller, String label, IconData icon, {bool isNumber = false, String? hint}) {
     return TextFormField(
@@ -458,11 +469,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   final String telegramBotToken = "8758696223:AAEy9rOEnIG4yiG3wqHA2mE3pV0OKDaVzMI"; 
   final FaceDetector _faceDetector = FaceDetector(options: FaceDetectorOptions(enableClassification: true, enableContours: true, enableTracking: true));
 
-  // ---> NEW HARDWARE-OPTIONAL BLUETOOTH VARIABLES <---
-  BluetoothConnection? _bluetoothConnection;
-  bool _isBluetoothConnected = false;
-  // Replace with your actual HC-03 MAC address later
-  final String hc03MacAddress = "00:00:00:00:00:00"; 
+  final String esp8266IP = "192.168.0.5"; 
 
   bool _isBusy = false;
   bool _isDrowsy = false; 
@@ -479,12 +486,8 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   }
 
   Future<void> _initializeSystem() async {
-    // Added Bluetooth permissions to the request list
-    await [Permission.camera, Permission.location, Permission.bluetooth, Permission.bluetoothConnect, Permission.bluetoothScan].request();
+    await [Permission.camera, Permission.location].request(); 
     
-    // Attempt hardware connection gracefully
-    _connectToBluetooth();
-
     final cameras = await availableCameras();
     final frontCamera = cameras.firstWhere((camera) => camera.lensDirection == CameraLensDirection.front, orElse: () => cameras.first);
 
@@ -496,37 +499,15 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     setState(() { _statusMessage = "Active Monitoring"; _statusColor = const Color(0xFF4CAF50); });
   }
 
-  // ---> HARDWARE OPTIONAL CONNECT FUNCTION <---
-  Future<void> _connectToBluetooth() async {
+  Future<void> _sendWiFiCommand(String endpoint) async {
+    final url = Uri.parse('http://$esp8266IP/$endpoint');
     try {
-      _bluetoothConnection = await BluetoothConnection.toAddress(hc03MacAddress);
-      setState(() {
-        _isBluetoothConnected = true;
-      });
-      debugPrint('Connected to the HC-03 Hardware!');
-    } catch (error) {
-      // If hardware isn't found, it simply logs it and moves on. App won't crash!
-      debugPrint('Hardware not found or Bluetooth off. Operating in Software-Only mode: $error');
-      setState(() {
-        _isBluetoothConnected = false;
-      });
-    }
-  }
-
-  // ---> HARDWARE OPTIONAL SIGNAL FUNCTION <---
-  void _sendStopSignal() {
-    // Only attempts to send the signal if the car is actually connected
-    if (_isBluetoothConnected && _bluetoothConnection != null) {
-      try {
-        _bluetoothConnection!.output.add(Uint8List.fromList('S'.codeUnits));
-        _bluetoothConnection!.output.allSent.then((_) {
-          debugPrint('Emergency Stop signal sent to the car!');
-        });
-      } catch (e) {
-        debugPrint('Error sending hardware signal: $e');
+      final response = await http.get(url).timeout(const Duration(seconds: 2));
+      if (response.statusCode == 200) {
+        debugPrint("Wi-Fi Signal sent to ESP8266!");
       }
-    } else {
-      debugPrint('Software alarm triggered! (Hardware not connected)');
+    } catch (e) {
+      debugPrint("Wi-Fi Error: $e");
     }
   }
 
@@ -571,19 +552,21 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
           setState(() { _isDrowsy = true; _statusMessage = "🚨 DROWSINESS DETECTED!"; _statusColor = Colors.red.shade700; _statusIcon = Icons.campaign; });
           _audioPlayer.play(AssetSource(AppConstants.ALERT_SOUND));
           _audioPlayer.setReleaseMode(ReleaseMode.loop); 
-          
-          // ---> CALL THE HARDWARE SIGNAL <---
-          _sendStopSignal();
+          _sendWiFiCommand("stop");
         }
       }
       if (duration > AppConstants.EMERGENCY_ALERT_MS) {
         if (!_telegramAlertSent) {
-          (); 
+          _sendTelegramAlertWithLocation(); 
           setState(() { _telegramAlertSent = true; _statusMessage = "📤 CONTACTING EMERGENCY..."; });
         }
       }
     } else {
-      if (_isDrowsy) { setState(() => _isDrowsy = false); _audioPlayer.stop(); }
+      if (_isDrowsy) { 
+        setState(() => _isDrowsy = false); 
+        _audioPlayer.stop(); 
+        _sendWiFiCommand("resume"); 
+      }
       _closureStartTime = null;
       _telegramAlertSent = false; 
       setState(() { _statusMessage = "Active Monitoring"; _statusColor = const Color(0xFF4CAF50); _statusIcon = Icons.remove_red_eye; });
@@ -597,7 +580,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     try {
       Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       locationText = "Lat: ${position.latitude.toStringAsFixed(4)}, Lng: ${position.longitude.toStringAsFixed(4)}";
-      mapsLink = "https://www.google.com/maps?q=${position.latitude},${position.longitude}";
+       mapsLink = "https://www.google.com/maps/search/?api=1&query=${position.latitude},${position.longitude}";
       hospitalList = await _getNearbyHospitals(position.latitude, position.longitude);
     } catch (e) {
       locationText = "GPS Signal Lost";
@@ -607,7 +590,9 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     final String url = "https://api.telegram.org/bot$telegramBotToken/sendMessage";
     try {
       await http.post(Uri.parse(url), body: {'chat_id': widget.emergencyContact, 'text': message, 'parse_mode': 'Markdown'});
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Emergency Alert Sent!"), backgroundColor: Colors.green));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Emergency Alert Sent!"), backgroundColor: Colors.green));
+      }
     } catch (e) { print("Telegram Error: $e"); }
   }
 
@@ -673,8 +658,6 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
     _cameraController?.dispose(); 
     _faceDetector.close(); 
     _audioPlayer.dispose(); 
-    // ---> GRACEFUL DISPOSE BLUETOOTH <---
-    _bluetoothConnection?.dispose();
     super.dispose(); 
   }
   
@@ -691,6 +674,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
       ),
     );
   }
+
   Widget _buildInfoCard(IconData icon, String label, String value, {bool isAlert = false}) {
     return Expanded(child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: isAlert ? Colors.red.shade50 : Colors.white, borderRadius: BorderRadius.circular(16), border: isAlert ? Border.all(color: Colors.red) : null, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(icon, size: 18, color: isAlert ? Colors.red : Colors.grey), const SizedBox(width: 6), Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500))]), const SizedBox(height: 8), Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isAlert ? Colors.red : const Color(0xFF0D47A1)), overflow: TextOverflow.ellipsis)])));
   }

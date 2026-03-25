@@ -5,7 +5,6 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart'; 
 import 'package:firebase_core/firebase_core.dart'; 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -13,7 +12,6 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import 'package:google_fonts/google_fonts.dart';
 
 // ----------------------------------------------------------------------
 // 1. APP CONFIGURATION & CONSTANTS
@@ -69,7 +67,7 @@ class DriverSafetyApp extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------
-// 2. AUTH GATE - Redirects to Dashboard if logged in
+// 2. AUTH GATE - Standard Auth Management
 // ----------------------------------------------------------------------
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -83,8 +81,7 @@ class AuthGate extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
-          // Pass the UID to the Dashboard
-          return DriverDashboard(uid: snapshot.data!.uid);
+          return const DriverSetupPage();
         }
         return const LoginPage();
       },
@@ -113,18 +110,10 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
     
     try {
-      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      
-      // Navigate to Dashboard with UID
-      if (mounted && userCredential.user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => DriverDashboard(uid: userCredential.user!.uid)),
-        );
-      }
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(e.message ?? "Login Failed"), 
@@ -197,7 +186,7 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 // ----------------------------------------------------------------------
-// 4. SIGN UP PAGE
+// 4. SIGN UP PAGE - Solves Data Persistence Conflict
 // ----------------------------------------------------------------------
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -217,17 +206,16 @@ class _SignUpPageState extends State<SignUpPage> {
     setState(() => _isLoading = true);
     
     try {
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
       
-      if (mounted && userCredential.user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => DriverDashboard(uid: userCredential.user!.uid)),
-        );
-      }
+      // SOLVE DATA PROBLEM: Ensure new user doesn't inherit old local data
+      // We don't call prefs.clear() here because we want to preserve other settings, 
+      // but we ensure a fresh setup for this UID.
+      
+      if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(e.message ?? "Sign Up Failed"), 
@@ -296,205 +284,7 @@ class _SignUpPageState extends State<SignUpPage> {
 }
 
 // ----------------------------------------------------------------------
-// 5. DRIVER DASHBOARD (NEW)
-// ----------------------------------------------------------------------
-class DriverDashboard extends StatefulWidget {
-  final String uid;
-  const DriverDashboard({super.key, required this.uid});
-
-  @override
-  State<DriverDashboard> createState() => _DriverDashboardState();
-}
-
-class _DriverDashboardState extends State<DriverDashboard> {
-  String driverName = "Loading...";
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
-      appBar: AppBar(
-        title: Text("DASHBOARD", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person, color: Color(0xFF0D47A1)),
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(documentId: widget.uid)));
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async => await FirebaseAuth.instance.signOut(),
-          )
-        ],
-      ),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          
-          var userData = snapshot.data!.data() as Map<String, dynamic>?;
-          driverName = userData?['driver_name'] ?? "Driver";
-          String carNum = userData?['car_number'] ?? "N/A";
-          String blood = userData?['blood_type'] ?? "N/A";
-          String telegram = userData?['telegram_id'] ?? "N/A";
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Welcome,", style: GoogleFonts.poppins(fontSize: 16, color: Colors.grey)),
-                Text(driverName, style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                
-                Row(
-                  children: [
-                    _buildStatCard("Safety Score", "98%", Icons.verified_user, Colors.green),
-                    const SizedBox(width: 15),
-                    _buildStatCard("Vehicle", carNum, Icons.directions_car, Colors.blue),
-                  ],
-                ),
-                
-                const SizedBox(height: 25),
-                Text("Quick Actions", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 15),
-                
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 15,
-                  crossAxisSpacing: 15,
-                  children: [
-                    _buildActionTile(context, "START MONITORING", Icons.videocam_rounded, Colors.blue, () {
-                      Navigator.push(context, MaterialPageRoute(builder: (context) => DrowsinessDetectionPage(
-                        driverName: driverName,
-                        carNumber: carNum,
-                        bloodType: blood,
-                        emergencyContact: telegram,
-                      )));
-                    }),
-                    _buildActionTile(context, "UPDATE CONFIG", Icons.settings_applications, Colors.orange, () {
-                      Navigator.push(context, MaterialPageRoute(builder: (context) => const DriverSetupPage()));
-                    }),
-                    _buildActionTile(context, "FIND REST STOP", Icons.local_cafe, Colors.brown, () {}),
-                    _buildActionTile(context, "HISTORY", Icons.history, Colors.blueGrey, () {}),
-                  ],
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(height: 10),
-            Text(value, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-            Text(title, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionTile(BuildContext context, String title, IconData icon, Color color, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: color.withOpacity(0.3))),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 40),
-            const SizedBox(height: 10),
-            Text(title, textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, color: color)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ----------------------------------------------------------------------
-// 6. PROFILE PAGE (NEW)
-// ----------------------------------------------------------------------
-class ProfilePage extends StatefulWidget {
-  final String documentId;
-  const ProfilePage({super.key, required this.documentId});
-
-  @override
-  State<ProfilePage> createState() => _ProfilePageState();
-}
-
-class _ProfilePageState extends State<ProfilePage> {
-  final _nameController = TextEditingController();
-  final _carController = TextEditingController();
-  final _bloodController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCurrentData();
-  }
-
-  _loadCurrentData() async {
-    var doc = await FirebaseFirestore.instance.collection('users').doc(widget.documentId).get();
-    if (doc.exists) {
-      setState(() {
-        _nameController.text = doc['driver_name'] ?? '';
-        _carController.text = doc['car_number'] ?? '';
-        _bloodController.text = doc['blood_type'] ?? '';
-      });
-    }
-  }
-
-  _updateProfile() async {
-    await FirebaseFirestore.instance.collection('users').doc(widget.documentId).update({
-      'driver_name': _nameController.text,
-      'car_number': _carController.text,
-      'blood_type': _bloodController.text,
-    });
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profile Updated!"), backgroundColor: Colors.green));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text("EDIT PROFILE", style: GoogleFonts.poppins(fontWeight: FontWeight.bold))),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            TextField(controller: _nameController, decoration: const InputDecoration(labelText: "Driver Name", border: OutlineInputBorder())),
-            const SizedBox(height: 15),
-            TextField(controller: _carController, decoration: const InputDecoration(labelText: "Car Number", border: OutlineInputBorder())),
-            const SizedBox(height: 15),
-            TextField(controller: _bloodController, decoration: const InputDecoration(labelText: "Blood Type", border: OutlineInputBorder())),
-            const SizedBox(height: 30),
-            SizedBox(
-              width: double.infinity, height: 50,
-              child: ElevatedButton(onPressed: _updateProfile, child: const Text("SAVE CHANGES")),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ----------------------------------------------------------------------
-// 7. DRIVER SETUP PAGE
+// 5. DRIVER SETUP - Standard Data Isolation Logic
 // ----------------------------------------------------------------------
 class DriverSetupPage extends StatefulWidget {
   const DriverSetupPage({super.key});
@@ -515,9 +305,11 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
     _loadSavedDriverData(); 
   }
 
+  // Uses UID to prevent account data crossover
   Future<void> _loadSavedDriverData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    
     final prefs = await SharedPreferences.getInstance();
     final uid = user.uid;
 
@@ -533,7 +325,17 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text("CONFIGURATION")),
+      appBar: AppBar(
+        title: const Text("CONFIGURATION"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+            }, 
+          )
+        ],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
@@ -542,6 +344,15 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
+                  child: const Icon(Icons.security, size: 64, color: Color(0xFF0D47A1)),
+                ),
+                const SizedBox(height: 24),
+                const Text("Safety First", textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D47A1))),
+                const SizedBox(height: 40),
+
                 _buildProfessionalInput(_nameController, "Driver Name", Icons.person),
                 const SizedBox(height: 16),
                 _buildProfessionalInput(_carController, "Vehicle Number", Icons.directions_car),
@@ -549,12 +360,41 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
                 _buildProfessionalInput(_bloodController, "Blood Group", Icons.bloodtype),
                 const SizedBox(height: 16),
                 _buildProfessionalInput(_emergencyController, "Telegram Chat ID", Icons.send, isNumber: true, hint: "e.g., 123456789"),
+                
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE3F2FD), 
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 20, color: Color(0xFF1565C0)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: RichText(
+                          text: const TextSpan(
+                            style: TextStyle(color: Color(0xFF1565C0), fontSize: 12),
+                            children: [
+                              TextSpan(text: "How to find ID: ", style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: "Search "),
+                              TextSpan(text: "@userinfobot ", style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: "on Telegram, click Start, and copy the 'Id' number."),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 40),
                 SizedBox(
                   height: 55,
                   child: ElevatedButton(
-                    onPressed: _saveAndGoBack,
-                    child: const Text("SAVE CONFIGURATION", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    onPressed: _startMonitoring,
+                    child: const Text("START MONITORING", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
                   ),
                 ),
               ],
@@ -565,10 +405,11 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
     );
   }
 
-  void _saveAndGoBack() async {
+  void _startMonitoring() async {
     if (_formKey.currentState!.validate()) {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
+      
       final prefs = await SharedPreferences.getInstance();
       final uid = user.uid;
       
@@ -577,15 +418,14 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
       await prefs.setString('${uid}_blood', _bloodController.text);
       await prefs.setString('${uid}_telegram', _emergencyController.text);
 
-      // Save to Firestore as well for the Dashboard
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'driver_name': _nameController.text,
-        'car_number': _carController.text,
-        'blood_type': _bloodController.text,
-        'telegram_id': _emergencyController.text,
-      }, SetOptions(merge: true));
-
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => DrowsinessDetectionPage(
+              driverName: _nameController.text,
+              carNumber: _carController.text,
+              bloodType: _bloodController.text,
+              emergencyContact: _emergencyController.text,
+        )));
+      }
     }
   }
 
@@ -593,11 +433,15 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
     return TextFormField(
       controller: controller,
       keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+      style: const TextStyle(fontWeight: FontWeight.w500),
       decoration: InputDecoration(
-        labelText: label, hintText: hint,
+        labelText: label,
+        hintText: hint,
         prefixIcon: Icon(icon, color: const Color(0xFF0D47A1)),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-        filled: true, fillColor: const Color(0xFFF5F7FB),
+        filled: true,
+        fillColor: const Color(0xFFF5F7FB),
+        contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
       ),
       validator: (value) => value!.isEmpty ? "Required" : null,
     );
@@ -605,7 +449,7 @@ class _DriverSetupPageState extends State<DriverSetupPage> {
 }
 
 // ----------------------------------------------------------------------
-// 8. DROWSINESS DETECTION PAGE
+// 6. MAIN DETECTION DASHBOARD 
 // ----------------------------------------------------------------------
 class DrowsinessDetectionPage extends StatefulWidget {
   final String driverName;
@@ -625,7 +469,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   final String telegramBotToken = "8758696223:AAEy9rOEnIG4yiG3wqHA2mE3pV0OKDaVzMI"; 
   final FaceDetector _faceDetector = FaceDetector(options: FaceDetectorOptions(enableClassification: true, enableContours: true, enableTracking: true));
 
-  final String esp8266IP = "10.160.200.231"; 
+  final String esp8266IP = "192.168.15.88"; 
 
   bool _isBusy = false;
   bool _isDrowsy = false; 
@@ -643,11 +487,14 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
 
   Future<void> _initializeSystem() async {
     await [Permission.camera, Permission.location].request(); 
+    
     final cameras = await availableCameras();
     final frontCamera = cameras.firstWhere((camera) => camera.lensDirection == CameraLensDirection.front, orElse: () => cameras.first);
+
     _cameraController = CameraController(frontCamera, ResolutionPreset.low, enableAudio: false);
     await _cameraController!.initialize();
     if (!mounted) return;
+
     _cameraController!.startImageStream(_processCameraImage);
     setState(() { _statusMessage = "Active Monitoring"; _statusColor = const Color(0xFF4CAF50); });
   }
@@ -655,8 +502,13 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   Future<void> _sendWiFiCommand(String endpoint) async {
     final url = Uri.parse('http://$esp8266IP/$endpoint');
     try {
-      await http.get(url).timeout(const Duration(seconds: 2));
-    } catch (e) { debugPrint("Wi-Fi Error: $e"); }
+      final response = await http.get(url).timeout(const Duration(seconds: 2));
+      if (response.statusCode == 200) {
+        debugPrint("Wi-Fi Signal sent to ESP8266!");
+      }
+    } catch (e) {
+      debugPrint("Wi-Fi Error: $e");
+    }
   }
 
   Future<void> _processCameraImage(CameraImage image) async {
@@ -672,14 +524,22 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
            if(!_isDrowsy) setState(() { _statusMessage = "FACE NOT DETECTED"; _statusColor = Colors.orange; _statusIcon = Icons.warning_amber_rounded; });
         }
       }
-    } catch (e) { debugPrint("Error: $e"); } finally { _isBusy = false; }
+    } catch (e) {
+      debugPrint("Error: $e");
+    } finally {
+      _isBusy = false;
+    }
   }
 
   void _checkForDrowsiness(Face face) {
-    final leftProb = face.leftEyeOpenProbability ?? 1.0;
-    final rightProb = face.rightEyeOpenProbability ?? 1.0;
+    final leftEAR = _calculateEAR(face.contours[FaceContourType.leftEye]);
+    final rightEAR = _calculateEAR(face.contours[FaceContourType.rightEye]);
+    final double leftProb = face.leftEyeOpenProbability ?? 1.0;
+    final double rightProb = face.rightEyeOpenProbability ?? 1.0;
 
-    final bool isClosed = leftProb < AppConstants.PROB_THRESHOLD && rightProb < AppConstants.PROB_THRESHOLD;
+    final bool isClosed = (leftEAR != null && leftEAR < AppConstants.EAR_THRESHOLD) || 
+                          (rightEAR != null && rightEAR < AppConstants.EAR_THRESHOLD) ||
+                          (leftProb < AppConstants.PROB_THRESHOLD && rightProb < AppConstants.PROB_THRESHOLD);
 
     if (isClosed) {
       _closureStartTime ??= DateTime.now();
@@ -716,17 +576,44 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   Future<void> _sendTelegramAlertWithLocation() async {
     String locationText = "Locating...";
     String mapsLink = "";
+    String hospitalList = "Searching...";
     try {
-      Position pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      locationText = "Lat: ${pos.latitude}, Lng: ${pos.longitude}";
-      mapsLink = "http://googleusercontent.com/www.google.com/maps/search/?api=1&query=${pos.latitude},${pos.longitude}";
-    } catch (e) { locationText = "GPS Signal Lost"; }
-    
-    final String message = "🚨 *EMERGENCY ALERT* 🚨\n\n👤 *Driver:* ${widget.driverName}\n🚗 *Vehicle:* ${widget.carNumber}\n📍 *Location:* $locationText\n🔗 *Map:* $mapsLink";
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      locationText = "Lat: ${position.latitude.toStringAsFixed(4)}, Lng: ${position.longitude.toStringAsFixed(4)}";
+       mapsLink = "https://www.google.com/maps/search/?api=1&query=${position.latitude},${position.longitude}";
+      hospitalList = await _getNearbyHospitals(position.latitude, position.longitude);
+    } catch (e) {
+      locationText = "GPS Signal Lost";
+      hospitalList = "Network Unavailable";
+    }
+    final String message = "🚨 *EMERGENCY: DROWSINESS ALERT* 🚨\n\n👤 *Driver:* ${widget.driverName}\n🚗 *Vehicle:* ${widget.carNumber}\n🩸 *Blood:* ${widget.bloodType}\n\n📍 *Live Location:*\n$locationText\n\n🏥 *Nearby Hospitals:*\n$hospitalList\n\n🔗 *Click to View Map:*\n$mapsLink";
     final String url = "https://api.telegram.org/bot$telegramBotToken/sendMessage";
     try {
       await http.post(Uri.parse(url), body: {'chat_id': widget.emergencyContact, 'text': message, 'parse_mode': 'Markdown'});
-    } catch (e) { debugPrint("Telegram Error: $e"); }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Emergency Alert Sent!"), backgroundColor: Colors.green));
+      }
+    } catch (e) { print("Telegram Error: $e"); }
+  }
+
+  Future<String> _getNearbyHospitals(double lat, double lon) async {
+    final String query = '[out:json];node(around:3000,$lat,$lon)[amenity=hospital];out;';
+    final String url = "https://overpass-api.de/api/interpreter?data=$query";
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final elements = data['elements'] as List;
+        if (elements.isEmpty) return "No hospitals found within 3km.";
+        List<String> hospitals = [];
+        for (var i = 0; i < math.min(elements.length, 3); i++) {
+          var tags = elements[i]['tags'];
+          if (tags != null && tags['name'] != null) hospitals.add("• ${tags['name']}");
+        }
+        return hospitals.isEmpty ? "Medical Centers nearby" : hospitals.join("\n");
+      }
+    } catch (e) { return "Error fetching data"; }
+    return "Unknown";
   }
 
   InputImage? _inputImageFromCameraImage(CameraImage image) {
@@ -755,6 +642,16 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   }
 
   static final _orientations = { DeviceOrientation.portraitUp: 0, DeviceOrientation.landscapeLeft: 90, DeviceOrientation.portraitDown: 180, DeviceOrientation.landscapeRight: 270 };
+  double? _calculateEAR(FaceContour? eyeContour) {
+    if (eyeContour == null) return null;
+    final points = eyeContour.points;
+    if (points.isEmpty) return null;
+    math.Point<int> left = points.first, right = points.first, top = points.first, bottom = points.first;
+    for (var point in points) { if (point.x < left.x) left = point; if (point.x > right.x) right = point; if (point.y < top.y) top = point; if (point.y > bottom.y) bottom = point; }
+    final double width = _euclideanDistance(left, right); final double height = _euclideanDistance(top, bottom);
+    return width == 0 ? 0.0 : height / width;
+  }
+  double _euclideanDistance(math.Point<int> p1, math.Point<int> p2) { return math.sqrt(math.pow(p2.x - p1.x, 2) + math.pow(p2.y - p1.y, 2)); }
   
   @override
   void dispose() { 
@@ -771,7 +668,7 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
       appBar: AppBar(title: const Text("SAFETY MONITOR")),
       body: Column(
         children: [
-          Expanded(flex: 6, child: Container(margin: const EdgeInsets.all(16), child: ClipRRect(borderRadius: BorderRadius.circular(24), child: Stack(fit: StackFit.expand, children: [_cameraController != null && _cameraController!.value.isInitialized ? CameraPreview(_cameraController!) : const Center(child: CircularProgressIndicator()), Positioned(top: 20, left: 0, right: 0, child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: _statusColor, borderRadius: BorderRadius.circular(30)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_statusIcon, color: Colors.white), const SizedBox(width: 8), Text(_statusMessage, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]))))])))),
+          Expanded(flex: 6, child: Container(margin: const EdgeInsets.all(16), decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, spreadRadius: 5)]), child: ClipRRect(borderRadius: BorderRadius.circular(24), child: Stack(fit: StackFit.expand, children: [_cameraController != null && _cameraController!.value.isInitialized ? CameraPreview(_cameraController!) : const Center(child: CircularProgressIndicator()), Positioned(top: 20, left: 0, right: 0, child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: _statusColor, borderRadius: BorderRadius.circular(30), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)]), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_statusIcon, color: Colors.white), const SizedBox(width: 8), Text(_statusMessage, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))]))))])))),
           Expanded(flex: 3, child: Container(width: double.infinity, padding: const EdgeInsets.all(24), decoration: const BoxDecoration(color: Color(0xFFF5F7FB), borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30))), child: Column(children: [Row(children: [_buildInfoCard(Icons.person, "Driver", widget.driverName), const SizedBox(width: 12), _buildInfoCard(Icons.directions_car, "Vehicle", widget.carNumber)]), const SizedBox(height: 12), Row(children: [_buildInfoCard(Icons.bloodtype, "Blood Grp", widget.bloodType), const SizedBox(width: 12), _buildInfoCard(Icons.local_hospital, "Status", _isDrowsy ? "DANGER" : "SAFE", isAlert: _isDrowsy)])])))
         ],
       ),
@@ -779,6 +676,6 @@ class _DrowsinessDetectionPageState extends State<DrowsinessDetectionPage> {
   }
 
   Widget _buildInfoCard(IconData icon, String label, String value, {bool isAlert = false}) {
-    return Expanded(child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: isAlert ? Colors.red.shade50 : Colors.white, borderRadius: BorderRadius.circular(16), border: isAlert ? Border.all(color: Colors.red) : null), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(icon, size: 18, color: isAlert ? Colors.red : Colors.grey), const SizedBox(width: 6), Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500))]), const SizedBox(height: 8), Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isAlert ? Colors.red : const Color(0xFF0D47A1)), overflow: TextOverflow.ellipsis)])));
+    return Expanded(child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: isAlert ? Colors.red.shade50 : Colors.white, borderRadius: BorderRadius.circular(16), border: isAlert ? Border.all(color: Colors.red) : null, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(icon, size: 18, color: isAlert ? Colors.red : Colors.grey), const SizedBox(width: 6), Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500))]), const SizedBox(height: 8), Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isAlert ? Colors.red : const Color(0xFF0D47A1)), overflow: TextOverflow.ellipsis)])));
   }
 }

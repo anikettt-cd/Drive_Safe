@@ -1,114 +1,124 @@
-# Driver_Safe
-Driver Cognitive Load & Drowsiness Detection System — a mobile-based intelligent safety application that uses real-time computer vision and behavioral analysis to detect driver drowsiness and cognitive overload, trigger instant alerts, and notify emergency contacts and nearby hospitals during critical situations.
+🚗 Drive Safe
 
-🛡️ Drive Safe - AI Drowsiness Detection System
-Drive Safe is a life-saving Flutter application designed to prevent road accidents caused by driver fatigue. It uses Artificial Intelligence (Google ML Kit) to monitor the driver's eyes in real-time and triggers alarms if drowsiness is detected.
+An AI-Powered Driver Monitoring & Telemetry App built with Flutter
 
-If the driver remains unresponsive, the app automatically sends an Emergency Telegram Alert containing the driver's Live GPS Location and a list of Nearby Hospitals to a pre-set emergency contact.
+Detecting fatigue before it becomes a danger. Protecting journeys in real-time.
 
-🚀 Key Features
-👁️ Real-Time Eye Tracking: Uses Google ML Kit Face Detection to calculate Eye Aspect Ratio (EAR) and eye-open probability.
+💡 About The Project
 
-⏱️ Multi-Stage Alerts:
-Microsleep Warning (0.5s): Yellow UI warning for short blinks.
-Drowsiness Alarm (1.0s): Loud audio alarm and Red UI screen.
-Emergency Trigger (5.0s): Automatically contacts emergency services.
+Driver fatigue and distraction are among the leading causes of road accidents worldwide. Drive Safe tackles this problem head-on by transforming a standard smartphone into an intelligent dashcam and driver-monitoring system.
 
-🆘 Automated Telegram SOS: Sends a critical alert message via a Telegram Bot including:
-Driver Name & Vehicle Details.
-Live GPS Coordinates (Google Maps Link).
-Nearby Hospitals (Fetched via OpenStreetMap/Overpass API).
+By analyzing live camera feeds through on-device Machine Learning (ML) and cross-referencing it with real-time GPS telemetry, the app actively monitors the driver's state and intervenes when it detects drowsiness or unsafe driving patterns.
 
-📱 Device Compatibility: Includes a custom NV21 Image Converter to support cameras on specific Android devices (Vivo, Samsung, etc.) that use non-standard YUV formats.
+🔥 Core Features (Under the Hood)
 
-🎨 Professional UI: Clean, high-contrast "Medical Blue" interface for visibility during day and night driving.
+🧠 AI-Powered Alertness Tracking
 
-🛠️ Tech Stack
-Framework: Flutter (Dart)
-Face Detection: google_mlkit_face_detection
-Camera: camera
-Audio: audioplayers
-Networking: http (for Telegram & Overpass API)
-Location: geolocator
+Facial Landmark Detection: Utilizes Google ML Kit to map the driver's face in real-time, functioning entirely on-device for zero latency.
 
-⚙️ Installation & Setup
+Micro-Sleep Detection: Continuously calculates the "Eye Open Probability." If the driver's eyes remain closed beyond a safe threshold (e.g., 1.5 seconds), the system flags a critical micro-sleep event.
+
+Distraction Monitoring: Tracks head pose angles (Euler Y and Z) to ensure the driver's attention remains on the road.
+
+📍 Telemetry & Speed Analysis
+
+Hyper-Accurate GPS: Integrates the Geolocator plugin to pull high-frequency location data.
+
+Velocity Tracking: Monitors vehicle speed to adjust the severity and timing of alerts (e.g., faster speeds trigger faster interventions).
+
+🚨 Active Intervention System
+
+Escalating Alarms: Triggers high-visibility screen flashes and loud audio cues to snap the driver back to attention.
+
+Emergency Protocols: In the event of prolonged unresponsiveness, the app can utilize saved user data to initiate emergency workflows.
+
+☁️ Cloud-Synced Dashboard
+
+Firebase Authentication: Secure, encrypted login flow ensuring personal data stays private.
+
+Cloud Firestore: A live-updating dashboard that stores trip history, driver metrics, and custom emergency contact configurations.
+
+🛠 Technical Architecture
+
+| Category | Technology Stack |
+| Frontend UI/UX | Flutter (Dart), Material Design 3 |
+| Backend & Auth | Firebase Authentication, Cloud Firestore |
+| Computer Vision | Google ML Kit (Vision API), Camera Plugin |
+| Hardware APIs | Geolocator, Audio Players |
+
+🚀 Getting Started
+
+Follow these instructions to set up the project locally on your machine.
+
 1. Prerequisites
-Flutter SDK installed.
-VS Code or Android Studio.
-Physical Android Device (Simulators cannot test the camera efficiently).
 
-2. Clone the Repository
-Bash
-git clone https://github.com/your-username/drive-safe.git
-cd drive-safe
-3. Install Dependencies
-Bash
+Ensure you have the following installed and configured:
+
+Flutter SDK: Version 3.47.0 (or stable compatible).
+
+Java JDK: Java 17 or 21 is highly recommended. (Note: Java 25 may cause Gradle build failures).
+
+Android Studio / Android SDK: API Level 34 configured.
+
+Physical Device: A physical Android or iOS device is required. Emulators do not support the real-time camera passthrough needed for ML Kit.
+
+2. Installation & Setup
+
+Clone the repository and navigate to the working directory:
+
+git clone https://github.com/your-username/Drive_Safe.git
+cd "Drive_Safe/Drive Safe"
+
+
+
+Fetch the Dart dependencies:
+
 flutter pub get
-4. Configuration
-A. Telegram Bot Setup
 
-Open lib/main.dart.
 
-Find the variable telegramBotToken.
 
-Replace it with your own bot token from @BotFather.
+3. Firebase Configuration
 
-Dart
-final String telegramBotToken = "YOUR_NEW_TOKEN_HERE";
-B. Permissions Ensure your android/app/src/main/AndroidManifest.xml has the following permissions:
+This project requires a live Firebase connection to function.
 
-XML
-<uses-permission android:name="android.permission.CAMERA"/>
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-<uses-permission android:name="android.permission.INTERNET"/>
-C. Assets Ensure you have an alarm.mp3 file in the assets/ folder and it is registered in pubspec.yaml:
+Create a new project in the Firebase Console.
 
-YAML
-flutter:
-  assets:
-    - assets/alarm.mp3
-5. Run the App
-Connect your phone and run:
+Enable Email/Password Authentication.
 
-Bash
+Create a Firestore Database and set the security rules to allow authenticated read/writes.
+
+Register your Android app and download the google-services.json file.
+
+Place google-services.json inside the android/app/ directory.
+
+4. Build and Run
+
+Connect your physical phone (enable USB Debugging) and compile the app:
+
 flutter run
-🧠 How It Works
-Input: The app captures a video stream from the front camera.
 
-Processing:
 
-It converts the raw camera image (YUV/NV21) into a format ML Kit can read.
-ML Kit detects the face and identifies 6 landmarks per eye.
 
-Logic:
+(If you are testing experimental features located in secondary files, you can target them directly using flutter run -t lib/main1.dart).
 
-It calculates the EAR (Eye Aspect Ratio). If EAR < 0.25, the eye is considered "Closed".
-It starts a timer.
+🛑 Known Issues & Troubleshooting
 
-Triggers:
+Infinite Loading Spinner on Dashboard:
+If the app launches but hangs on a loading screen, your Firestore Security Rules have likely expired (Test Mode expires after 30 days), or your Firebase Auth returned a null user. Check your Firebase console.
 
-> 500ms: Warning state (Microsleep).
-> 1000ms: Alarm state (Audio plays).
-> 5000ms: Emergency state (Telegram API called with GPS data).
+App Freezes / Crashes on Startup:
+The app requires intensive hardware access. If the Android permission pop-ups fail to show, manually go to Settings > Apps > Drive Safe > Permissions and grant Camera and Location access.
+
+Gradle Compatibility Error:
+If you get an error regarding Java 25.0.1 being incompatible with Gradle, point Flutter to your Android Studio bundled JDK:
+flutter config --jdk-dir="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 🤝 Contributing
-Contributions are welcome!
-Fork the Project.
-Create your Feature Branch (git checkout -b feature/AmazingFeature).
-Commit your Changes (git commit -m 'Add some AmazingFeature').
-Push to the Branch (git push origin feature/AmazingFeature).
-Open a Pull Request.
 
-📄 License
-Distributed under the MIT License. See LICENSE for more information.
+We welcome contributions to make roads safer! To contribute:
 
-📞 Contact
-Aniket Saini
+Fork the Project
 
-GitHub: anikettt-cd
+Create your Feature Branch (git checkout -b feature/AmazingFeature)
 
-Email:  sainianiket751@gmail.com
-
-⚠️ Disclaimer
-This application is a driver assistance tool. It is not a substitute for rest and responsible driving habits. The developers are not liable for any accidents or failures in the alert system.
+Commit your Changes (`git commit -
